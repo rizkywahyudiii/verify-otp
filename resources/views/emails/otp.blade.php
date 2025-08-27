@@ -92,7 +92,7 @@
             <p>Silakan masukkan kode di atas pada halaman verifikasi OTP untuk menyelesaikan proses pendaftaran.</p>
 
             <p>Terima kasih,<br>
-            Tim Support</p>
+            Kelompok 9 - Keamanan Data & Jaringan</p>
         </div>
 
         <div class="footer">

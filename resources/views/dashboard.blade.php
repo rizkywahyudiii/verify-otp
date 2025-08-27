@@ -50,6 +50,7 @@
         background-color: transparent;
         color: #dc3545;
         border: 2px solid #dc3545;
+        
     }
     .btn-outline-danger:hover {
         background-color: #dc3545;

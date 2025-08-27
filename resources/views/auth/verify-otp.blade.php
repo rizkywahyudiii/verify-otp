@@ -102,7 +102,7 @@
         <div class="form-group">
             <label for="otp_code">Kode OTP</label>
             <input type="text" id="otp_code" name="otp_code" value="{{ old('otp_code') }}"
-                   maxlength="6" pattern="[0-9]{6}" placeholder="123456" required>
+                   maxlength="6" pattern="[0-9]{6}" placeholder="Masukkan 6 digit kode OTP" required>
             @error('otp_code')
                 <div class="error">{{ $message }}</div>
             @enderror
