@@ -127,12 +127,12 @@
                 Tunggu <span id="countdown">30</span> detik sebelum kirim ulang
             </div>
         </div>
-        <br>
+        {{-- <br>
         Sudah punya akun?<a href="{{ route('login.show') }}">Login</a>
         <small style="color: #666; margin-top: 10px; display: block;">
             Email salah?<a href="{{ route('register.show') }}" style="color: #007bff;">Register Ulang</a>
         </small>
-        <br>
+        <br> --}}
     </div>
 
     <script>

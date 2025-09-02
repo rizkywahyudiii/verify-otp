@@ -10,6 +10,7 @@ use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Str;
+use Illuminate\Support\Facades\Log;
 
 class AuthController extends Controller
 {
@@ -26,10 +27,20 @@ class AuthController extends Controller
      */
     public function register(Request $request)
     {
+
         $request->validate([
             'name' => 'required|string|max:255',
             'email' => 'required|string|email|max:255|unique:users',
-            'password' => 'required|string|min:8|confirmed',
+            'password' => [
+                'required',
+                'string',
+                'min:8',
+                'confirmed',
+                'regex:/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[^A-Za-z\d]).+$/',
+            ],
+        ], [
+            'password.min' => 'Password minimal 8 karakter.',
+            'password.regex' => 'Password harus mengandung huruf besar, huruf kecil, angka, dan simbol.',
         ]);
 
         // Create user
@@ -53,8 +64,15 @@ class AuthController extends Controller
         // Send OTP email
         Mail::to($user->email)->send(new OTPMail($otpCode, $user->name));
 
+        Log::info('OTP_SENT', [
+            'context' => 'register',
+            'email' => $user->email,
+            'user_id' => $user->id,
+            'expires_at' => now()->addMinutes(10)->toDateTimeString(),
+        ]);
+
         return redirect()->route('verify-otp.show')
-            ->with('success', 'Registrasi berhasil! Silakan cek email Anda untuk kode OTP.')
+            ->with('success', 'Silakan cek email Anda untuk mendapatkan kode OTP.')
             ->with('email', $request->email); // Pass email to next page
     }
 
@@ -63,23 +81,18 @@ class AuthController extends Controller
      */
     public function showVerifyOTP()
     {
-        // Check if email exists in session
-        $email = session('email');
+        // Ambil email dari session atau old input (flash) agar tetap di halaman saat error
+        $email = session('email') ?? old('email');
         if (!$email) {
             return redirect()->route('register.show')
-                ->with('error', 'Silakan register terlebih dahulu untuk mendapatkan kode OTP.');
+                ->with('error', 'Silakan register atau login terlebih dahulu untuk mendapatkan kode OTP.');
         }
 
-        // Check if user is already verified
+        // Pastikan user ada (untuk mencegah akses dengan email non-eksisten)
         $user = User::where('email', $email)->first();
         if (!$user) {
             return redirect()->route('register.show')
                 ->with('error', 'Email tidak ditemukan. Silakan register terlebih dahulu.');
-        }
-
-        if ($user->is_verified) {
-            return redirect()->route('login.show')
-                ->with('error', 'Akun Anda sudah diverifikasi. Silakan login.');
         }
 
         return view('auth.verify-otp');
@@ -102,25 +115,47 @@ class AuthController extends Controller
                 ->with('error', 'Email tidak ditemukan. Silakan register terlebih dahulu.');
         }
 
-        $otpCode = OTPCode::where('user_id', $user->id)
+        // Cek OTP dan alasan kegagalan (invalid vs expired)
+        $otpAny = OTPCode::where('user_id', $user->id)
             ->where('otp_code', $request->otp_code)
-            ->where('expires_at', '>', now())
             ->latest()
             ->first();
 
-        if (!$otpCode) {
+        if (!$otpAny) {
+            Log::warning('OTP_VERIFY_FAILED', [
+                'email' => $request->email,
+                'reason' => 'invalid',
+            ]);
             return back()->withErrors(['otp_code' => 'Kode OTP tidak valid atau sudah expired.'])
                 ->with('email', $request->email);
         }
 
-        // Mark user as verified
-        $user->markAsVerified();
+        if ($otpAny->expires_at <= now()) {
+            Log::warning('OTP_VERIFY_FAILED', [
+                'email' => $request->email,
+                'reason' => 'expired',
+            ]);
+            return back()->withErrors(['otp_code' => 'Kode OTP tidak valid atau sudah expired.'])
+                ->with('email', $request->email);
+        }
+
+        // Jika ini dari proses registrasi, tandai terverifikasi jika belum
+        if (!$user->is_verified) {
+            $user->markAsVerified();
+        }
 
         // Delete the used OTP
-        $otpCode->delete();
+        $otpAny->delete();
 
-        // Auto login user after successful verification
+        // Auto login user setelah OTP valid (untuk login maupun registrasi)
         Auth::login($user);
+        $request->session()->regenerate();
+
+        Log::info('OTP_VERIFY_SUCCESS', [
+            'email' => $request->email,
+            'user_id' => $user->id,
+            'verified_at' => now()->toDateTimeString(),
+        ]);
 
         return redirect()->route('dashboard')
             ->with('success', 'Verifikasi berhasil! Selamat datang di dashboard.');
@@ -146,23 +181,53 @@ class AuthController extends Controller
 
         $credentials = $request->only('email', 'password');
 
-        if (Auth::attempt($credentials)) {
-            $user = Auth::user();
-
-            if (!$user->is_verified) {
-                Auth::logout();
-                return redirect()->route('verify-otp.show')
-                    ->with('error', 'Akun Anda belum diverifikasi. Silakan verifikasi terlebih dahulu.')
-                    ->with('email', $request->email); // Pass email for auto-fill
-            }
-
-            $request->session()->regenerate();
-            return redirect()->intended('dashboard');
+        // Validasi kredensial tanpa login terlebih dahulu
+        if (!Auth::validate($credentials)) {
+            return back()->withErrors([
+                'email' => 'Email atau password salah.',
+            ]);
         }
 
-        return back()->withErrors([
-            'email' => 'Email atau password salah.',
-        ]);
+        // Ambil user terkait
+        $user = User::where('email', $request->email)->first();
+        if (!$user) {
+            return back()->withErrors([
+                'email' => 'Email tidak terdaftar.',
+            ]);
+        }
+
+        // Generate dan kirim OTP setiap login
+        // Rate limit: tunggu 30 detik jika baru minta
+        $recentOTP = OTPCode::where('user_id', $user->id)
+            ->where('created_at', '>', now()->subSeconds(30))
+            ->first();
+
+        if (!$recentOTP) {
+            // Hapus OTP lama
+            OTPCode::where('user_id', $user->id)->delete();
+
+            $otpCode = str_pad(random_int(0, 999999), 6, '0', STR_PAD_LEFT);
+
+            OTPCode::create([
+                'user_id' => $user->id,
+                'otp_code' => $otpCode,
+                'expires_at' => now()->addMinutes(10),
+            ]);
+
+            Mail::to($user->email)->send(new OTPMail($otpCode, $user->name));
+
+            Log::info('OTP_SENT', [
+                'context' => 'login',
+                'email' => $user->email,
+                'user_id' => $user->id,
+                'expires_at' => now()->addMinutes(10)->toDateTimeString(),
+            ]);
+        }
+
+        // Arahkan ke halaman verifikasi OTP, simpan email ke session
+        return redirect()->route('verify-otp.show')
+            ->with('success', 'Kode OTP telah dikirim ke email Anda. Silakan masukkan untuk melanjutkan login.')
+            ->with('email', $request->email);
     }
 
     /**
@@ -193,19 +258,19 @@ class AuthController extends Controller
                 ->with('error', 'Email tidak ditemukan. Silakan register terlebih dahulu.');
         }
 
-        // Check if user is already verified
-        if ($user->is_verified) {
-            return redirect()->route('login.show')
-                ->with('error', 'Akun Anda sudah diverifikasi. Silakan login.');
-        }
+        // Hapus pembatasan: izinkan resend OTP baik saat register maupun login
 
-        // Check if there's a recent OTP (within 2 minutes)
+        // Check if there's a recent OTP (within 30 seconds)
         $recentOTP = OTPCode::where('user_id', $user->id)
-            ->where('created_at', '>', now()->subMinutes(2))
+            ->where('created_at', '>', now()->subSeconds(30))
             ->first();
 
         if ($recentOTP) {
-            return back()->withErrors(['email' => 'Harap tunggu 2 menit sebelum meminta OTP baru.']);
+            Log::notice('OTP_RESEND_RATE_LIMITED', [
+                'email' => $request->email,
+                'cooldown_seconds' => 30,
+            ]);
+            return back()->withErrors(['email' => 'Harap tunggu 30 detik sebelum meminta OTP baru.'])->withInput();
         }
 
         // Delete old OTP codes
@@ -223,6 +288,13 @@ class AuthController extends Controller
 
         // Send new OTP email
         Mail::to($user->email)->send(new OTPMail($otpCode, $user->name));
+
+        Log::info('OTP_SENT', [
+            'context' => 'resend',
+            'email' => $user->email,
+            'user_id' => $user->id,
+            'expires_at' => now()->addMinutes(10)->toDateTimeString(),
+        ]);
 
         return back()->with('success', 'OTP baru telah dikirim ke email Anda.')
             ->with('email', $request->email);

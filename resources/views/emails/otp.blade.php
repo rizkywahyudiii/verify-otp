@@ -76,7 +76,7 @@
         <div class="content">
             <p>Halo <strong>{{ $userName }}</strong>,</p>
 
-            <p>Terima kasih telah mendaftar. Berikut adalah kode OTP untuk verifikasi akun Anda:</p>
+            <p>Terima kasih telah bergabung dengan kami. Berikut adalah kode OTP untuk verifikasi akun Anda:</p>
 
             <div class="otp-code">
                 {{ $otpCode }}
@@ -86,7 +86,7 @@
             <ul>
                 <li>Kode OTP ini berlaku selama 10 menit</li>
                 <li>Jangan bagikan kode ini kepada siapapun</li>
-                <li>Jika Anda tidak merasa mendaftar, abaikan email ini</li>
+                <li>Jika Anda tidak merasa mendaftar atau mencoba login, abaikan email ini</li>
             </ul>
 
             <p>Silakan masukkan kode di atas pada halaman verifikasi OTP untuk menyelesaikan proses pendaftaran.</p>
