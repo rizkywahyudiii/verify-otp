@@ -23,7 +23,7 @@ class OTPCode extends Model
      */
     protected $fillable = [
         'user_id',
-        'otp_code',
+        'otp_hash',
         'expires_at',
     ];
 

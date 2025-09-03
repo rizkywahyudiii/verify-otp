@@ -54,10 +54,10 @@ class AuthController extends Controller
         // Generate OTP
         $otpCode = str_pad(random_int(0, 999999), 6, '0', STR_PAD_LEFT);
 
-        // Save OTP to database
+        // Save OTP to database (store hash only for verification)
         OTPCode::create([
             'user_id' => $user->id,
-            'otp_code' => $otpCode,
+            'otp_hash' => Hash::make($otpCode),
             'expires_at' => now()->addMinutes(10), // OTP expires in 10 minutes
         ]);
 
@@ -117,11 +117,10 @@ class AuthController extends Controller
 
         // Cek OTP dan alasan kegagalan (invalid vs expired)
         $otpAny = OTPCode::where('user_id', $user->id)
-            ->where('otp_code', $request->otp_code)
             ->latest()
             ->first();
 
-        if (!$otpAny) {
+        if (!$otpAny || !Hash::check($request->otp_code, $otpAny->otp_hash)) {
             Log::warning('OTP_VERIFY_FAILED', [
                 'email' => $request->email,
                 'reason' => 'invalid',
@@ -210,7 +209,7 @@ class AuthController extends Controller
 
             OTPCode::create([
                 'user_id' => $user->id,
-                'otp_code' => $otpCode,
+                'otp_hash' => Hash::make($otpCode),
                 'expires_at' => now()->addMinutes(10),
             ]);
 
@@ -279,10 +278,10 @@ class AuthController extends Controller
         // Generate new OTP
         $otpCode = str_pad(random_int(0, 999999), 6, '0', STR_PAD_LEFT);
 
-        // Save new OTP to database
+        // Save new OTP to database (store hash only)
         OTPCode::create([
             'user_id' => $user->id,
-            'otp_code' => $otpCode,
+            'otp_hash' => Hash::make($otpCode),
             'expires_at' => now()->addMinutes(10),
         ]);
 
